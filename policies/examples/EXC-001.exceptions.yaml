@@ -1,0 +1,20 @@
+exceptions:
+  - rule: PUB-002
+    resource: kubernetes_service_v1.bad_no_reason
+    reason: "надо"
+    owner: team-shop
+    expires: "+60d"
+  - rule: PUB-002
+    resource: kubernetes_service_v1.bad_far_expiry
+    reason: "Временный NodePort для нагрузочного теста"
+    owner: team-shop
+    expires: "+400d"
+  - rule: PUB-002
+    resource: kubernetes_service_v1.bad_no_owner
+    reason: "Временный NodePort для нагрузочного теста"
+    expires: "+60d"
+  - rule: PUB-002
+    resource: kubernetes_service_v1.good_exception
+    reason: "Временный NodePort для нагрузочного теста, задача OPS-142"
+    owner: team-shop
+    expires: "+60d"

@@ -1,0 +1,24 @@
+# Проверки Checkov, которые считаем критичными (блокируют слияние).
+# Остальные проверки Checkov попадают в комментарий без блокировки.
+# Публичный доступ
+CKV_AWS_20    # S3: ACL public-read
+CKV_AWS_57    # S3: ACL public-write
+CKV_AWS_24    # SG: SSH из 0.0.0.0/0
+CKV_AWS_25    # SG: RDP из 0.0.0.0/0
+CKV_AWS_17    # RDS: publicly accessible
+CKV_AZURE_9   # NSG: RDP из интернета
+CKV_AZURE_10  # NSG: SSH из интернета
+CKV_GCP_2     # Firewall: SSH из 0.0.0.0/0
+CKV_GCP_3     # Firewall: RDP из 0.0.0.0/0
+CKV_GCP_28    # GCS: публичный бакет
+# Избыточные права
+CKV_AWS_1     # IAM: полный доступ *:*
+CKV_AWS_62    # IAM: политика роли *:*
+CKV_AWS_63    # IAM: Action * в политике
+CKV_K8S_16    # привилегированный контейнер
+CKV_K8S_17    # hostPID
+CKV_K8S_18    # hostIPC
+CKV_K8S_19    # hostNetwork
+# Секреты в коде
+CKV_SECRET_2  # ключ доступа AWS
+CKV_SECRET_6  # высокоэнтропийная строка

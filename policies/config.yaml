@@ -1,0 +1,33 @@
+# Настройки пакета политик. Меняются через pull request с ревью команды платформы.
+config:
+  # Обязательные метки (TAG-001, TAG-002)
+  required_tags: [owner, environment, cost-center]
+  # Допустимые окружения (TAG-003)
+  environments: [dev, stage, prod]
+  # Разрешённые пространства имён реестра модулей (SRC-002)
+  registry_namespaces: [terraform-aws-modules, Azure, terraform-google-modules, Protemir]
+  # Разрешённые git-источники модулей (SRC-002)
+  git_prefixes:
+    - "git::https://github.com/Protemir/"
+  # Разрешённые репозитории Helm (SRC-005)
+  helm_repositories:
+    - https://traefik.github.io/charts
+    - https://charts.jetstack.io
+    - https://cloudnative-pg.github.io/charts
+    - https://bitnami.github.io/sealed-secrets
+    - https://prometheus-community.github.io/helm-charts
+    - https://grafana.github.io/helm-charts
+    - oci://ghcr.io/
+  # Разрешённые реестры образов (SRC-007)
+  image_registries:
+    - registry.k8s.io/
+    - ghcr.io/
+    - quay.io/
+    - cgr.dev/
+    - docker.io/library/
+    - mirror.gcr.io/
+  # Минимальные версии (SRC-009): postgres, mysql — мажорная; kubernetes — major*100+minor
+  min_versions:
+    postgres: 14
+    mysql: 8
+    kubernetes: 132

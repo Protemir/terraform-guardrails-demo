@@ -1,0 +1,102 @@
+{{- $v := .Values }}
+{{- if $v.backup.enabled }}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ $v.backup.storeName }}
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  retentionPolicy: {{ $v.backup.retention | quote }}
+  configuration:
+    destinationPath: {{ $v.backup.destinationPath | quote }}
+    endpointURL: {{ $v.backup.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ $v.backup.secretName }}
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: {{ $v.backup.secretName }}
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+---
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $v.name }}
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  instances: {{ $v.instances }}
+  imageName: {{ $v.imageName }}
+  inheritedMetadata:
+    labels: {{ toYaml $v.labels | nindent 6 }}
+  storage:
+    size: {{ $v.storageSize }}
+    {{- if $v.storageClass }}
+    storageClass: {{ $v.storageClass }}
+    {{- end }}
+  resources: {{ toYaml $v.resources | nindent 4 }}
+  {{- with $v.postgresql.parameters }}
+  postgresql:
+    parameters: {{ toYaml . | nindent 6 }}
+  {{- end }}
+  {{- if $v.restore.enabled }}
+  bootstrap:
+    recovery:
+      source: origin
+      database: {{ $v.database }}
+      owner: {{ $v.owner }}
+  externalClusters:
+    - name: origin
+      plugin:
+        name: {{ $v.plugin }}
+        parameters:
+          barmanObjectName: {{ $v.restore.originStore }}
+          serverName: {{ $v.restore.originName }}
+  {{- else }}
+  bootstrap:
+    initdb:
+      database: {{ $v.database }}
+      owner: {{ $v.owner }}
+  {{- end }}
+  {{- if $v.backup.enabled }}
+  plugins:
+    - name: {{ $v.plugin }}
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ $v.backup.storeName }}
+  {{- end }}
+{{- if $v.backup.enabled }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $v.name }}-daily
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  schedule: {{ $v.backup.schedule | quote }}
+  immediate: {{ $v.backup.immediate }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $v.name }}
+  method: plugin
+  pluginConfiguration:
+    name: {{ $v.plugin }}
+{{- end }}
+{{- if $v.podMonitor }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $v.name }}
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ $v.name }}
+  podMetricsEndpoints:
+    - port: metrics
+{{- end }}

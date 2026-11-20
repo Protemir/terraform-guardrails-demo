@@ -1,0 +1,5 @@
+apiVersion: v2
+name: cluster-issuers
+description: ClusterIssuer'ы cert-manager для модуля ingress
+type: application
+version: 1.0.0

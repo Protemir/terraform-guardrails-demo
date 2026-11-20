@@ -1,0 +1,287 @@
+# Переиспользуемый конвейер проверки кода Terraform/OpenTofu.
+# Подключение к любому репозиторию — docs/onboarding.md:
+#   jobs:
+#     iac:
+#       uses: Protemir/terraform-guardrails-demo/.github/workflows/iac-checks.yml@v1
+#       with: { root: infra/prod, kind: false }
+name: iac-checks
+
+on:
+  workflow_call:
+    inputs:
+      root:
+        description: Каталог корневого модуля, для которого строится план
+        type: string
+        default: live/stand
+      engine:
+        description: terraform или tofu
+        type: string
+        default: terraform
+      engine-version:
+        type: string
+        default: "1.17.2"
+      kind:
+        description: Поднять kind (и MinIO) для плана модулей Kubernetes
+        type: boolean
+        default: true
+      backend-config:
+        description: Файл -backend-config; пусто — план без бэкенда (-backend=false не подходит для plan, поэтому используется local)
+        type: string
+        default: stand/backend.hcl
+      exceptions:
+        description: Файл исключений репозитория
+        type: string
+        default: policies/exceptions.yaml
+      guardrails-ref:
+        description: Версия пакета политик
+        type: string
+        default: main
+    secrets:
+      MINIO_ROOT_USER:
+        required: false
+      MINIO_ROOT_PASSWORD:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CONFTEST_IMAGE: openpolicyagent/conftest:v0.71.1
+  CHECKOV_IMAGE: bridgecrew/checkov:3.4.6
+  TRIVY_IMAGE: aquasec/trivy:0.76.2
+  MINIO_IMAGE: cgr.dev/chainguard/minio:latest
+  MC_IMAGE: cgr.dev/chainguard/minio-client:latest
+
+jobs:
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      fmt: ${{ steps.fmt.outcome }}
+      validate: ${{ steps.validate.outcome }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Protemir/terraform-guardrails-demo
+          ref: ${{ inputs.guardrails-ref }}
+          path: .guardrails
+
+      - name: Pull scanner images (parallel)
+        run: |
+          docker pull -q $CHECKOV_IMAGE >/dev/null &
+          docker pull -q $TRIVY_IMAGE >/dev/null &
+          wait
+
+      - uses: hashicorp/setup-terraform@v4
+        if: inputs.engine == 'terraform'
+        with:
+          terraform_version: ${{ inputs.engine-version }}
+          terraform_wrapper: false
+      - uses: opentofu/setup-opentofu@v2
+        if: inputs.engine == 'tofu'
+        with:
+          tofu_version: ${{ inputs.engine-version }}
+          tofu_wrapper: false
+
+      - name: fmt
+        id: fmt
+        continue-on-error: true
+        run: ${{ inputs.engine }} fmt -check -recursive -diff -no-color $(ls -d modules live 2>/dev/null || echo .)
+
+      - name: validate
+        id: validate
+        continue-on-error: true
+        run: |
+          fail=0
+          for d in $(find . -name '*.tf' -not -path './.guardrails/*' -not -path './tests/registry/*' -not -path '*/policies/examples/*' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u); do
+            echo "::group::validate $d"
+            ${{ inputs.engine }} -chdir="$d" init -backend=false -input=false -no-color >/dev/null && ${{ inputs.engine }} -chdir="$d" validate -no-color || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
+
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.66.0
+      - name: tflint
+        run: |
+          mkdir -p results
+          cfg=.tflint.hcl; [ -f "$cfg" ] || cfg=.guardrails/.tflint.hcl
+          tflint --init --config "$PWD/$cfg"
+          echo '{"issues":[]}' > results/tflint.json
+          for d in $(find . -name '*.tf' -not -path './.guardrails/*' -not -path './tests/registry/*' -not -path '*/policies/examples/*' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u); do
+            d=${d#./}
+            tflint --chdir="$d" --config "$PWD/$cfg" --format json --force > /tmp/t.json || true
+            jq --arg d "$d" '{issues: [.issues[]? | .range.filename = ($d + "/" + .range.filename)]}' /tmp/t.json > /tmp/t2.json
+            jq -s '{issues: (.[0].issues + .[1].issues)}' results/tflint.json /tmp/t2.json > /tmp/m.json && mv /tmp/m.json results/tflint.json
+            tflint --chdir="$d" --config "$PWD/$cfg" --force --format compact || true
+          done
+          echo "TFLint: $(jq '.issues | length' results/tflint.json) замечаний"
+
+      - name: checkov
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src $CHECKOV_IMAGE \
+            -d /src --framework terraform secrets --skip-path policies/examples --skip-path .guardrails \
+            -o json --soft-fail --quiet > results/checkov.json || true
+          jq -r '[.. | objects | select(has("failed_checks")) | .failed_checks | length] | add // 0 | "Checkov: \(.) замечаний"' results/checkov.json || true
+
+      - name: trivy
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src $TRIVY_IMAGE config \
+            --skip-dirs policies/examples --skip-dirs .guardrails --format json --exit-code 0 --quiet /src > results/trivy.json
+          jq -r '[.Results[]?.Misconfigurations[]? | select(.Status=="FAIL")] | length | "Trivy: \(.) замечаний"' results/trivy.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-results
+          path: results/
+
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      plan: ${{ steps.plan.outcome }}
+      conftest: ${{ steps.conftest.outcome }}
+    env:
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER || 'ci-minio' }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Protemir/terraform-guardrails-demo
+          ref: ${{ inputs.guardrails-ref }}
+          path: .guardrails
+
+      - uses: hashicorp/setup-terraform@v4
+        if: inputs.engine == 'terraform'
+        with:
+          terraform_version: ${{ inputs.engine-version }}
+          terraform_wrapper: false
+      - uses: opentofu/setup-opentofu@v2
+        if: inputs.engine == 'tofu'
+        with:
+          tofu_version: ${{ inputs.engine-version }}
+          tofu_wrapper: false
+
+      - name: kind
+        if: inputs.kind
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: stand
+          config: ${{ hashFiles('stand/kind.yaml') != '' && 'stand/kind.yaml' || '.guardrails/stand/kind.yaml' }}
+
+      - name: MinIO (состояние Terraform)
+        if: inputs.kind && inputs.backend-config != ''
+        run: |
+          [ -n "$MINIO_ROOT_PASSWORD" ] || { MINIO_ROOT_PASSWORD=$(openssl rand -hex 24); echo "::add-mask::$MINIO_ROOT_PASSWORD"; echo "MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD" >> $GITHUB_ENV; }
+          docker run -d --name minio --network kind --user 0:0 -p 9000:9000 -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD $MINIO_IMAGE server /data >/dev/null
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
+          docker run --rm --network kind -e "MC_HOST_s=http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@minio:9000" $MC_IMAGE mb s/tfstate s/backups
+
+      - name: plan
+        id: plan
+        continue-on-error: true
+        run: |
+          mkdir -p results
+          export AWS_ACCESS_KEY_ID="$MINIO_ROOT_USER" AWS_SECRET_ACCESS_KEY="$MINIO_ROOT_PASSWORD"
+          export TF_VAR_s3_access_key="$MINIO_ROOT_USER" TF_VAR_s3_secret_key="$MINIO_ROOT_PASSWORD"
+          export TF_VAR_kubeconfig="$HOME/.kube/config"
+          TF=${{ inputs.engine }}
+          if [ -n "${{ inputs.backend-config }}" ]; then
+            $TF -chdir=${{ inputs.root }} init -input=false -no-color -backend-config="$PWD/${{ inputs.backend-config }}"
+          else
+            $TF -chdir=${{ inputs.root }} init -input=false -no-color
+          fi
+          start=$(date +%s)
+          $TF -chdir=${{ inputs.root }} plan -input=false -no-color -lock-timeout=60s -out=plan.out
+          echo "plan: $(( $(date +%s) - start )) s"
+          $TF -chdir=${{ inputs.root }} show -no-color plan.out > results/plan.txt
+          $TF -chdir=${{ inputs.root }} show -json plan.out > results/plan.json
+
+      - name: conftest
+        id: conftest
+        if: steps.plan.outcome == 'success'
+        run: |
+          data="--data .guardrails/policies/config.yaml"
+          [ -f policies/config.yaml ] && data="--data policies/config.yaml"
+          [ -f "${{ inputs.exceptions }}" ] && data="$data --data ${{ inputs.exceptions }}"
+          docker run --rm -v "$PWD:/w" -w /w $CONFTEST_IMAGE test results/plan.json \
+            -p .guardrails/policies --ignore '.*/examples/.*' $data -o json --no-fail > results/conftest.json
+          docker run --rm -v "$PWD:/w" -w /w $CONFTEST_IMAGE test results/plan.json \
+            -p .guardrails/policies $data --no-fail --no-color | tail -40
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plan-results
+          path: |
+            results/
+            !results/plan.out
+
+  report:
+    name: report
+    needs: [static, plan]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Protemir/terraform-guardrails-demo
+          ref: ${{ inputs.guardrails-ref }}
+          path: .guardrails
+      - uses: actions/download-artifact@v8
+        with:
+          path: results
+          merge-multiple: true
+
+      - name: Сводка
+        id: report
+        run: |
+          [ -f "${{ inputs.exceptions }}" ] && yq -o=json "${{ inputs.exceptions }}" > results/exceptions.json || true
+          cat > results/steps.json <<EOF
+          {"fmt": "${{ needs.static.outputs.fmt }}", "validate": "${{ needs.static.outputs.validate }}",
+           "plan": "${{ needs.plan.outputs.plan }}", "conftest": "${{ needs.plan.outputs.conftest }}"}
+          EOF
+          created=$(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }} --jq .run_started_at)
+          export PIPELINE_SECONDS=$(( $(date +%s) - $(date -d "$created" +%s) ))
+          set +e
+          node .guardrails/ci/report.mjs --in results --out comment.md --root "${{ inputs.root }}"
+          echo "code=$?" >> $GITHUB_OUTPUT
+          cat comment.md >> $GITHUB_STEP_SUMMARY
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Комментарий к pull request
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=${{ github.event.pull_request.number }}
+          id=$(gh api "repos/${{ github.repository }}/issues/$pr/comments" --paginate --jq '.[] | select(.body | startswith("<!-- iac-guardrails -->")) | .id' | tail -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" -F body=@comment.md >/dev/null
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/$pr/comments" -F body=@comment.md >/dev/null
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: iac-results
+          path: |
+            results/
+            comment.md
+
+      - name: Решение
+        run: |
+          if [ "${{ steps.report.outputs.code }}" != "0" ]; then
+            echo "::error::Есть блокирующие нарушения — слияние запрещено. Подробности в комментарии к PR."
+            exit 1
+          fi

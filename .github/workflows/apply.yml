@@ -1,0 +1,67 @@
+# Применение изменений — только вручную и только после подтверждения в окружении «stand»
+# (Settings → Environments → stand → Required reviewers).
+name: apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        type: choice
+        options: [terraform, tofu]
+        default: terraform
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-stand
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ${{ vars.STAND_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    outputs:
+      summary: ${{ steps.plan.outputs.summary }}
+    env:
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - name: План
+        id: plan
+        run: |
+          echo "Запуск от ${{ github.actor }}, коммит ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "summary=Применение коммита ${GITHUB_SHA::7} на стенд" >> $GITHUB_OUTPUT
+          echo "На пилоте здесь строится план против постоянного стенда и прикладывается к запросу на подтверждение." >> $GITHUB_STEP_SUMMARY
+
+  apply:
+    needs: plan
+    runs-on: ${{ vars.STAND_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    environment:
+      name: stand
+    env:
+      TF: ${{ inputs.engine }}
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "1.13.9"
+          tofu_wrapper: false
+      - uses: helm/kind-action@v1
+        if: vars.STAND_RUNNER == ''
+        with:
+          install_only: true
+      - name: Применение после подтверждения
+        run: ./stand/up.sh

@@ -1,0 +1,61 @@
+# Тесты библиотеки: правила на примерах, юнит-тесты модулей на Terraform и OpenTofu.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths: ["modules/**", "policies/**", "ci/**", ".github/workflows/tests.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install conftest
+        run: |
+          curl -sL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz | tar xz conftest
+          sudo mv conftest /usr/local/bin/
+      - name: Rego: формат и компиляция
+        run: |
+          curl -sL -o opa https://github.com/open-policy-agent/opa/releases/download/v1.22.4/opa_linux_amd64_static && chmod +x opa
+          ./opa fmt --list --fail policies/ && ./opa check --strict policies/
+      - name: Юнит-тесты библиотеки Rego
+        run: conftest verify -p policies --report full
+      - name: Каждое правило на своём примере (bad_* ловится, good_* нет)
+        run: node ci/test-policies.mjs
+      - name: Каталог правил актуален
+        run: |
+          node ci/gen-rules-doc.mjs
+          git diff --exit-code docs/RULES.md || { echo "::error::docs/RULES.md устарел: запустите node ci/gen-rules-doc.mjs"; exit 1; }
+
+  modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [terraform, tofu]
+        module: [app-namespace, ingress, postgres-cnpg, secrets, ns-monitoring]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        if: matrix.engine == 'terraform'
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - uses: opentofu/setup-opentofu@v2
+        if: matrix.engine == 'tofu'
+        with:
+          tofu_version: "1.13.9"
+          tofu_wrapper: false
+      - name: ${{ matrix.engine }} test — ${{ matrix.module }}
+        working-directory: modules/${{ matrix.module }}
+        run: |
+          ${{ matrix.engine }} init -backend=false -input=false -no-color
+          ${{ matrix.engine }} test -no-color

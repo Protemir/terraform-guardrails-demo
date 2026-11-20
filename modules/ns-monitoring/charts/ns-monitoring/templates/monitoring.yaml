@@ -1,0 +1,78 @@
+{{- $v := .Values }}
+{{- $ns := $v.namespace }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $ns }}-apps
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $ns | quote }}]
+  selector:
+    matchLabels: {{ toYaml $v.serviceSelector | nindent 6 }}
+  endpoints:
+    - port: {{ $v.metricsPort }}
+      path: {{ $v.metricsPath }}
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $ns }}-namespace
+  labels: {{ toYaml $v.labels | nindent 4 }}
+spec:
+  groups:
+    - name: namespace-{{ $ns }}
+      rules:
+        - alert: NamespacePodRestarting
+          expr: sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}"}[1h])) > {{ $v.alerts.restartsPerHour }}
+          for: 5m
+          labels:
+            severity: {{ $v.alerts.severity }}
+            namespace: {{ $ns }}
+            owner: {{ $v.labels.owner | default "unknown" }}
+          annotations:
+            summary: "Под {{ "{{" }} $labels.pod {{ "}}" }} перезапускается чаще {{ $v.alerts.restartsPerHour }} раз в час"
+        - alert: NamespaceQuotaNearLimit
+          expr: max by (resource) (kube_resourcequota{namespace="{{ $ns }}", type="used"} / ignoring(type) kube_resourcequota{namespace="{{ $ns }}", type="hard"} > 0) > {{ $v.alerts.quotaUsageRatio }}
+          for: 15m
+          labels:
+            severity: {{ $v.alerts.severity }}
+            namespace: {{ $ns }}
+            owner: {{ $v.labels.owner | default "unknown" }}
+          annotations:
+            summary: "Квота {{ "{{" }} $labels.resource {{ "}}" }} в {{ $ns }} занята больше чем на {{ mulf $v.alerts.quotaUsageRatio 100 }}%"
+        - alert: NamespacePodNotReady
+          expr: sum by (pod) (kube_pod_status_ready{namespace="{{ $ns }}", condition="false"}) > 0
+          for: {{ $v.alerts.notReadyMinutes }}m
+          labels:
+            severity: {{ $v.alerts.severity }}
+            namespace: {{ $ns }}
+            owner: {{ $v.labels.owner | default "unknown" }}
+          annotations:
+            summary: "Под {{ "{{" }} $labels.pod {{ "}}" }} не готов дольше {{ $v.alerts.notReadyMinutes }} минут"
+        - alert: NamespaceCpuThrottling
+          expr: sum by (pod) (increase(container_cpu_cfs_throttled_periods_total{namespace="{{ $ns }}"}[10m])) / sum by (pod) (increase(container_cpu_cfs_periods_total{namespace="{{ $ns }}"}[10m])) > {{ $v.alerts.cpuThrottleRatio }}
+          for: 15m
+          labels:
+            severity: info
+            namespace: {{ $ns }}
+            owner: {{ $v.labels.owner | default "unknown" }}
+          annotations:
+            summary: "Под {{ "{{" }} $labels.pod {{ "}}" }} упирается в лимит CPU"
+{{- if $v.dashboard.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $ns }}-dashboard
+  labels:
+    grafana_dashboard: "1"
+    {{- toYaml $v.labels | nindent 4 }}
+  annotations:
+    grafana_folder: {{ $v.dashboard.folder | quote }}
+data:
+  {{ $ns }}.json: |-
+    {{- $dash := .Files.Get "dashboard.json" | replace "__NAMESPACE__" $ns }}
+    {{- $dash | nindent 4 }}
+{{- end }}

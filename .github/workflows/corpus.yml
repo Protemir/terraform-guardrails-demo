@@ -1,0 +1,39 @@
+# Прогон пакета политик по TerraGoat и модулям реестра: обнаружение, ложные срабатывания, время.
+name: corpus
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1"
+  push:
+    branches: [main]
+    paths: ["policies/**", "ci/scan-corpus.sh", "ci/quality-report.mjs", "tests/registry/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - name: Инструменты
+        run: |
+          curl -sL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz | tar xz conftest && sudo mv conftest /usr/local/bin/
+          pipx install checkov==3.4.6 >/dev/null
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.76.2/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.76.2
+      - name: Прогон
+        run: ./ci/scan-corpus.sh
+      - name: Отчёт
+        run: cat docs/quality-report.md >> $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: corpus-results
+          path: |
+            results/corpus/
+            docs/quality-report.md

@@ -1,0 +1,27 @@
+{
+  "title": "Пространство имён __NAMESPACE__",
+  "uid": "ns-__NAMESPACE__",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "timeseries", "title": "CPU по подам, ядра", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"__NAMESPACE__\", container!=\"\"}[5m]))", "legendFormat": "{{pod}}" }]
+    },
+    {
+      "type": "timeseries", "title": "Память по подам", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"__NAMESPACE__\", container!=\"\"})", "legendFormat": "{{pod}}" }]
+    },
+    {
+      "type": "bargauge", "title": "Использование квоты", "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 } },
+      "targets": [{ "expr": "max by (resource) (kube_resourcequota{namespace=\"__NAMESPACE__\", type=\"used\"} / ignoring(type) kube_resourcequota{namespace=\"__NAMESPACE__\", type=\"hard\"} > 0)", "legendFormat": "{{resource}}" }]
+    },
+    {
+      "type": "timeseries", "title": "Перезапуски контейнеров за час", "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [{ "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=\"__NAMESPACE__\"}[1h]))", "legendFormat": "{{pod}}" }]
+    }
+  ]
+}

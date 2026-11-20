@@ -1,0 +1,15 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+plan.out
+crash.log
+.stand.env
+.tmp/
+results/
+comment.md
+drift.txt
+drift.md
+.guardrails/
+modules/**/.terraform.lock.hcl
+tests/**/.terraform.lock.hcl

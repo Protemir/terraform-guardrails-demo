@@ -1,0 +1,74 @@
+# Ежедневная проверка расхождения кода и стенда. Итог — issue с меткой drift.
+# На пилоте задание идёт на self-hosted раннере рядом с постоянным стендом (vars.STAND_RUNNER).
+# На облачном раннере стенд эфемерный: workflow поднимает его из main и вносит «ручную правку»,
+# чтобы показать, что расхождение находится (simulate = true).
+name: drift
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 08:00 по Астане
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: Внести ручную правку на эфемерном стенде
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ${{ vars.STAND_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    env:
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      SIMULATE: ${{ vars.STAND_RUNNER == '' && (inputs.simulate || github.event_name == 'schedule') }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - uses: helm/kind-action@v1
+        if: vars.STAND_RUNNER == ''
+        with:
+          install_only: true
+
+      - name: Эфемерный стенд из main
+        if: vars.STAND_RUNNER == ''
+        run: TF_VAR_monitoring_stack=false ./stand/up.sh
+
+      - name: «Ручная» правка мимо Terraform
+        if: env.SIMULATE == 'true'
+        run: |
+          kubectl -n shop-dev patch resourcequota quota --type merge -p '{"spec":{"hard":{"pods":"100"}}}'
+          kubectl -n shop-dev scale deployment web --replicas=5
+          kubectl -n shop-dev delete networkpolicy allow-dns
+
+      - name: Проверка расхождения
+        id: drift
+        run: ./tests/e2e/drift.sh
+
+      - name: Issue
+        if: steps.drift.outputs.drift == 'true'
+        run: |
+          title="Расхождение кода и стенда: $(date -u +%F)"
+          gh label create drift --color B60205 --description "Код и инфраструктура разошлись" 2>/dev/null || true
+          existing=$(gh issue list --label drift --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file drift.md
+            gh issue edit "$existing" --title "$title"
+          else
+            gh issue create --title "$title" --label drift --body-file drift.md
+          fi
+
+      - name: Расхождений нет — закрыть открытый issue
+        if: steps.drift.outputs.drift == 'false'
+        run: |
+          for n in $(gh issue list --label drift --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Расхождений нет на $(date -u +%F) (запуск ${{ github.run_id }})."
+          done

@@ -1,0 +1,22 @@
+# Проверка каждого pull request: тот же конвейер, что подключают другие репозитории.
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  iac:
+    uses: ./.github/workflows/iac-checks.yml
+    with:
+      root: live/stand
+      guardrails-ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit

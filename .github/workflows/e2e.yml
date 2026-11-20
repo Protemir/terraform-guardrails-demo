@@ -1,0 +1,75 @@
+# Приёмка модулей на чистом стенде: kind + MinIO, применение всех модулей,
+# повторный план без изменений, резервная копия в MinIO и восстановление в новый кластер.
+name: e2e
+
+on:
+  push:
+    branches: [main]
+    paths: ["modules/**", "live/**", "stand/**", "tests/e2e/**", ".github/workflows/e2e.yml"]
+  workflow_dispatch:
+    inputs:
+      engine:
+        type: choice
+        options: [terraform, tofu]
+        default: terraform
+
+permissions:
+  contents: read
+
+jobs:
+  stand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TF: ${{ inputs.engine || 'terraform' }}
+      MINIO_ROOT_USER: ${{ secrets.MINIO_ROOT_USER }}
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "1.13.9"
+          tofu_wrapper: false
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - name: Стенд с нуля одной командой
+        run: |
+          start=$(date +%s)
+          ./stand/up.sh
+          echo "APPLY_SECONDS=$(( $(date +%s) - start ))" >> $GITHUB_ENV
+
+      - name: Повторное применение не даёт изменений
+        run: ./tests/e2e/idempotency.sh
+
+      - name: Приложение отвечает по HTTPS через Traefik и cert-manager
+        run: ./tests/e2e/web.sh
+
+      - name: Сетевые политики работают
+        run: ./tests/e2e/netpol.sh
+
+      - name: Ключи MinIO не попали в состояние Terraform
+        run: ./tests/e2e/state-secrets.sh
+
+      - name: Резервная копия в MinIO и восстановление
+        run: ./tests/e2e/backup-restore.sh
+
+      - name: Итог
+        if: always()
+        run: |
+          echo "### Стенд: применение за ${APPLY_SECONDS:-?} с" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -A -o wide | tee -a $GITHUB_STEP_SUMMARY || true
+          kubectl get clusters.postgresql.cnpg.io,backups.postgresql.cnpg.io -A || true
+
+      - name: Диагностика
+        if: failure()
+        run: |
+          kubectl get events -A --sort-by=.lastTimestamp | tail -60 || true
+          kubectl -n shop-dev describe pods | tail -120 || true
+          kubectl -n cnpg-system logs deploy/cnpg-cloudnative-pg --tail=80 || true
+          docker logs minio --tail 40 || true
