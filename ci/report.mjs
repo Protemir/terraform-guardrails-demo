@@ -104,12 +104,28 @@ const add = (f) => {
   else findings.push(f);
 };
 
-// conftest: deny — critical, warn — по metadata.severity
-for (const r of read("conftest.json", []) || []) {
+// conftest: deny — critical, warn — по metadata.severity.
+// conftest.json — по JSON-плану корневого модуля; conftest-hcl.json — по коду HCL всех .tf
+// (ловит код под облака, для которого план без учётных данных не строится). Дубли убираем.
+const seen = new Set();
+const locateInFile = (file, address, attr) => {
+  if (!file || !fs.existsSync(file)) return null;
+  const parts = address.replace(/\[[^\]]*\]/g, "").split(".");
+  const ls = lines(file);
+  const head = parts[0] === "module" ? new RegExp(`^\\s*module\\s+"${parts[1]}"`) : new RegExp(`^\\s*resource\\s+"${parts[0]}"\\s+"${parts[1]}"`);
+  const start = ls.findIndex((l) => head.test(l));
+  if (start < 0) return { file, line: 1 };
+  if (attr) for (let i = start + 1; i < ls.length && !/^}/.test(ls[i]); i++) if (new RegExp(`\\b${attr}\\b`).test(ls[i])) return { file, line: i + 1 };
+  return { file, line: start + 1 };
+};
+for (const [src, inFile] of [["conftest.json", false], ["conftest-hcl.json", true]]) for (const r of read(src, []) || []) {
   for (const kind of ["failures", "warnings"]) {
     for (const x of r[kind] || []) {
       const m = x.metadata || {};
-      const loc = locate(m.address || "", m.attr);
+      const key = `${m.rule}|${m.address}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const loc = inFile ? locateInFile(r.filename, m.address || "", m.attr) : locate(m.address || "", m.attr);
       findings.push({
         tool: "OPA", rule: m.rule || "?", severity: kind === "failures" ? "critical" : m.severity || "medium",
         title: m.title || "", address: m.address || "", msg: x.msg.replace(/^\[[^\]]+\]\s*/, ""), loc,

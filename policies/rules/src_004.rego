@@ -17,6 +17,7 @@ findings contains f if {
 	some r in iac.of_type("helm_release")
 	remote(r.values)
 	v := iac.val(r.values, "version", "")
+	not contains(v, "${")
 	not exact(v)
 	f := {"address": r.address, "attr": "version", "msg": sprintf("чарт %v: version %q — нужна точная версия", [iac.val(r.values, "chart", "?"), v])}
 }

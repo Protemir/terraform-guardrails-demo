@@ -217,6 +217,20 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w $CONFTEST_IMAGE test results/plan.json \
             -p .guardrails/policies $data --no-fail --no-color | tail -40
 
+      # Второй проход — по коду HCL всех .tf: код под облака, для которого план без учётных данных
+      # не строится, тоже проверяется. Значения-выражения правила пропускают, а не угадывают.
+      - name: conftest (HCL)
+        id: conftest_hcl
+        run: |
+          data="--data .guardrails/policies/config.yaml"
+          [ -f policies/config.yaml ] && data="--data policies/config.yaml"
+          [ -f "${{ inputs.exceptions }}" ] && data="$data --data ${{ inputs.exceptions }}"
+          files=$(git ls-files '*.tf' | grep -v -E '^(policies/examples|tests/registry|\.guardrails)/' || true)
+          if [ -n "$files" ]; then
+            docker run --rm -v "$PWD:/w" -w /w $CONFTEST_IMAGE test $files --parser hcl2 \
+              -p .guardrails/policies $data -o json --no-fail > results/conftest-hcl.json
+          fi
+
       - uses: actions/upload-artifact@v7
         if: always()
         with:
