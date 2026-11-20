@@ -27,6 +27,8 @@ jobs:
       MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
       SIMULATE: ${{ vars.STAND_RUNNER == '' && (inputs.simulate || github.event_name == 'schedule') }}
       GH_TOKEN: ${{ github.token }}
+      # Эфемерный стенд поднимается без Prometheus/Grafana — проверка должна знать то же самое.
+      TF_VAR_monitoring_stack: ${{ vars.STAND_RUNNER == '' && 'false' || 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v4
@@ -40,7 +42,7 @@ jobs:
 
       - name: Эфемерный стенд из main
         if: vars.STAND_RUNNER == ''
-        run: TF_VAR_monitoring_stack=false ./stand/up.sh
+        run: ./stand/up.sh
 
       - name: «Ручная» правка мимо Terraform
         if: env.SIMULATE == 'true'
