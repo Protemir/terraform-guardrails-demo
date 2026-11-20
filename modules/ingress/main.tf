@@ -6,16 +6,15 @@ locals {
       isDefaultClass = true
       name           = "traefik"
     }
-    service = { type = var.service_type }
+    service = { spec = { type = var.service_type } }
     ports = {
-      web       = var.service_type == "NodePort" ? { nodePort = var.node_ports.http } : {}
+      web = merge(
+        var.service_type == "NodePort" ? { nodePort = var.node_ports.http } : {},
+        # Всё по HTTP перенаправляется на HTTPS.
+        { http = { redirections = { entryPoint = { to = "websecure", scheme = "https", permanent = true } } } },
+      )
       websecure = var.service_type == "NodePort" ? { nodePort = var.node_ports.https } : {}
     }
-    # Всё по HTTP перенаправляется на HTTPS.
-    additionalArguments = [
-      "--entryPoints.web.http.redirections.entryPoint.to=websecure",
-      "--entryPoints.web.http.redirections.entryPoint.scheme=https",
-    ]
     resources = {
       requests = { cpu = "100m", memory = "64Mi" }
       limits   = { cpu = "500m", memory = "256Mi" }

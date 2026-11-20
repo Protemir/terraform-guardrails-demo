@@ -608,9 +608,9 @@ resource "kubernetes_deployment_v1" "bad_sys_admin" {
 
 **Контейнер может работать от root** · уровень: средний · [policies/rules/iam_006.rego](../policies/rules/iam_006.rego)
 
-Ни у пода, ни у контейнера не задан run_as_non_root = true.
+Не задан run_as_non_root = true. Особенность провайдера kubernetes: если у контейнера есть блок security_context, провайдер отправляет runAsNonRoot = false, и это перекрывает настройку пода — поэтому значение проверяется на уровне контейнера.
 
-Как исправить: security_context { run_as_non_root = true, run_as_user = 10001 }.
+Как исправить: security_context { run_as_non_root = true } у пода и в каждом security_context контейнера.
 
 Пример нарушения ([все примеры](../policies/examples/IAM-006.tf)):
 

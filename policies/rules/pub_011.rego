@@ -16,6 +16,7 @@ meta := {
 findings contains f if {
 	some r in iac.of_type("aws_eks_cluster")
 	vpc := iac.block(r.values, "vpc_config")
+
 	# По умолчанию AWS включает публичную точку; выражение HCL — значение неизвестно, пропускаем.
 	iac.val(vpc, "endpoint_public_access", true) == true
 	cidrs := object.get(vpc, "public_access_cidrs", null)

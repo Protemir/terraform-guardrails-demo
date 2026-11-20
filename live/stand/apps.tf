@@ -94,6 +94,7 @@ resource "kubernetes_deployment_v1" "web" {
           }
 
           security_context {
+            run_as_non_root            = true
             allow_privilege_escalation = false
             read_only_root_filesystem  = true
             capabilities {

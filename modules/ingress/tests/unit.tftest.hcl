@@ -8,11 +8,11 @@ run "defaults_pinned_and_cloud_ready" {
     error_message = "Версии чартов закреплены"
   }
   assert {
-    condition     = yamldecode(helm_release.traefik.values[0]).service.type == "LoadBalancer"
+    condition     = yamldecode(helm_release.traefik.values[0]).service.spec.type == "LoadBalancer"
     error_message = "В облаке по умолчанию LoadBalancer"
   }
   assert {
-    condition     = contains(yamldecode(helm_release.traefik.values[0]).additionalArguments, "--entryPoints.web.http.redirections.entryPoint.to=websecure")
+    condition     = yamldecode(helm_release.traefik.values[0]).ports.web.http.redirections.entryPoint.to == "websecure"
     error_message = "HTTP должен перенаправляться на HTTPS"
   }
   assert {

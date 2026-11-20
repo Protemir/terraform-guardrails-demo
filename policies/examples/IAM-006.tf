@@ -41,3 +41,28 @@ resource "kubernetes_deployment_v1" "good_non_root" {
     }
   }
 }
+
+resource "kubernetes_deployment_v1" "bad_container_override" {
+  metadata {
+    name = "bad-container-override"
+  }
+  spec {
+    template {
+      metadata {
+        labels = { app = "web" }
+      }
+      spec {
+        security_context {
+          run_as_non_root = true
+        }
+        container {
+          name  = "web"
+          image = "nginx:1.29.3"
+          security_context {
+            read_only_root_filesystem = true
+          }
+        }
+      }
+    }
+  }
+}
