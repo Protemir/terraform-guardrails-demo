@@ -17,3 +17,8 @@ exceptions:
     reason: "Образец шифртекста kubeseal в примере и тесте модуля secrets: это не секрет, расшифровать его без ключа контроллера нельзя"
     owner: platform
     expires: "2027-05-01"
+  - rule: PUB-003
+    resource: "kubernetes_daemon_set_v1.net_probe*"
+    reason: "Агент замеров сетевой задержки узлов работает в host network; заменим на eBPF-экспортер, задача PLAT-214"
+    owner: platform
+    expires: "2027-02-28"
