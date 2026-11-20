@@ -47,6 +47,18 @@ warn contains r if {
 	r := report(f)
 }
 
+# Нарушения, снятые действующим исключением, тоже попадают в отчёт — с пометкой excepted,
+# чтобы в комментарии было видно, какое правило и почему не сработало.
+warn contains r if {
+	some f in suppressed
+	r := object.union(report(f), {
+		"msg": sprintf("[%s] %s — снято исключением: %s", [f.id, f.address, f.msg]),
+		"excepted": true,
+		"original_severity": f.severity,
+		"severity": "info",
+	})
+}
+
 report(f) := {
 	"msg": sprintf("[%s] %s — %s", [f.id, f.address, f.msg]),
 	"rule": f.id,

@@ -126,6 +126,11 @@ for (const [src, inFile] of [["conftest.json", false], ["conftest-hcl.json", tru
       if (seen.has(key)) continue;
       seen.add(key);
       const loc = inFile ? locateInFile(r.filename, m.address || "", m.attr) : locate(m.address || "", m.attr);
+      if (m.excepted) {
+        const ex = exceptions.find((e) => e.rule === m.rule && globToRe(e.resource).test(m.address)) || { reason: "—", owner: "—", expires: "—" };
+        suppressed.push({ tool: "OPA", rule: m.rule, severity: m.original_severity, address: m.address, loc, exception: ex });
+        continue;
+      }
       findings.push({
         tool: "OPA", rule: m.rule || "?", severity: kind === "failures" ? "critical" : m.severity || "medium",
         title: m.title || "", address: m.address || "", msg: x.msg.replace(/^\[[^\]]+\]\s*/, ""), loc,
@@ -230,9 +235,14 @@ if (rest.length) {
 }
 
 if (suppressed.length) {
-  md.push(`<details><summary>Применённые исключения: ${suppressed.length}</summary>\n`);
-  md.push("| Правило | Ресурс | Обоснование | Владелец | До |\n|---|---|---|---|---|");
-  for (const s of suppressed) md.push(`| \`${s.rule}\` | ${s.address || s.file} | ${s.exception.reason} | ${s.exception.owner} | ${s.exception.expires} |`);
+  // Исключения из наших правил показываем открыто: это осознанно пропущенные нарушения.
+  const ours = suppressed.some((s) => s.tool === "OPA");
+  md.push(`<details${ours ? " open" : ""}><summary>Применённые исключения: ${suppressed.length}</summary>\n`);
+  md.push("| Правило | Ресурс | Обоснование | Владелец | До | Где |\n|---|---|---|---|---|---|");
+  const order = (s) => (s.tool === "OPA" ? 0 : 1);
+  for (const s of suppressed.sort((a, b) => order(a) - order(b))) {
+    md.push(`| \`${s.rule}\`${s.severity ? ` (${sevRu[s.severity] || s.severity})` : ""} | ${s.address || s.file} | ${s.exception.reason} | ${s.exception.owner} | ${s.exception.expires} | ${link(s.loc)} |`);
+  }
   md.push("\n</details>\n");
 }
 
