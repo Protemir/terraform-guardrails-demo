@@ -185,7 +185,8 @@ const bySev = (s) => findings.filter((f) => f.severity === s).length;
 md.push(`Нарушения: **${bySev("critical")}** критичных, ${bySev("high")} высоких, ${bySev("medium")} средних, ${bySev("low")} низких. Исключений применено: ${suppressed.length}.`);
 md.push("");
 
-const row = (f) => `| ${sevIcon[f.severity] || ""} ${f.severity} | \`${f.rule}\` | ${f.tool} | ${f.msg.replace(/\|/g, "\\|")} | ${link(f.loc)} |`;
+const sevRu = { critical: "критично", high: "высокий", medium: "средний", low: "низкий", info: "инфо" };
+const row = (f) => `| ${sevIcon[f.severity] || ""}&nbsp;${sevRu[f.severity] || f.severity} |\`${f.rule}\` | ${f.tool} | ${f.msg.replace(/\|/g, "\\|")} | ${link(f.loc)} |`;
 const head = "| Уровень | Правило | Инструмент | Что не так | Где |\n|---|---|---|---|---|";
 
 if (blocking.length) {
