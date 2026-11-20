@@ -12,3 +12,8 @@ exceptions:
     reason: "Модули библиотеки подключаются локальными путями внутри репозитория; закрепление по SHA проверяет наше правило SRC-001 для внешних источников"
     owner: platform
     expires: "2027-05-01"
+  - rule: CKV_SECRET_6
+    resource: "modules/secrets/*"
+    reason: "Образец шифртекста kubeseal в примере и тесте модуля secrets: это не секрет, расшифровать его без ключа контроллера нельзя"
+    owner: platform
+    expires: "2027-05-01"

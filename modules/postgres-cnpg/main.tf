@@ -3,18 +3,18 @@ locals {
   s3_secret  = var.backup.enabled ? (var.backup.s3_secret_name != "" ? var.backup.s3_secret_name : "${var.name}-s3") : ""
 
   cluster_values = {
-    name          = var.name
-    instances     = var.instances
-    imageName     = var.image
-    storageSize   = var.storage_size
-    storageClass  = var.storage_class
-    database      = var.database
-    owner         = var.database_owner
-    labels        = var.labels
-    resources     = var.resources
-    postgresql    = { parameters = var.postgresql_parameters }
-    podMonitor    = var.pod_monitor
-    plugin        = "barman-cloud.cloudnative-pg.io"
+    name         = var.name
+    instances    = var.instances
+    imageName    = var.image
+    storageSize  = var.storage_size
+    storageClass = var.storage_class
+    database     = var.database
+    owner        = var.database_owner
+    labels       = var.labels
+    resources    = var.resources
+    postgresql   = { parameters = var.postgresql_parameters }
+    podMonitor   = var.pod_monitor
+    plugin       = "barman-cloud.cloudnative-pg.io"
     backup = {
       enabled         = var.backup.enabled
       storeName       = local.store_name
@@ -26,8 +26,8 @@ locals {
       immediate       = var.backup.immediate
     }
     restore = {
-      enabled    = var.restore.enabled
-      originName = var.restore.origin_cluster
+      enabled     = var.restore.enabled
+      originName  = var.restore.origin_cluster
       originStore = var.restore.origin_store != "" ? var.restore.origin_store : "${var.restore.origin_cluster}-store"
     }
   }

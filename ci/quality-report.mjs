@@ -7,6 +7,16 @@ const dir = "results/corpus";
 const work = ".tmp/corpus";
 const read = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); } catch { return d; } };
 const checkovCritical = new Set(fs.readFileSync("ci/checkov-critical.txt", "utf8").split(/\r?\n/).map((l) => l.replace(/#.*/, "").trim()).filter(Boolean));
+const trivyDowngrade = new Set(fs.readFileSync("ci/trivy-noncritical.txt", "utf8").split(/\r?\n/).map((l) => l.replace(/#.*/, "").trim()).filter(Boolean));
+// Файлы TerraGoat без ресурсов с ошибками конфигурации (служебные), с причиной.
+const helperFiles = {
+  "azure/random.tf": "генератор случайного суффикса имён (random_integer), облачных ресурсов нет",
+  "azure/policies.tf": "определение и назначение Azure Policy с эффектом audit — служебный ресурс без ошибки конфигурации; Checkov и Trivy тоже ничего не находят",
+};
+// Ручной разбор критичных срабатываний на модулях реестра.
+const reviewed = {
+  "checkov:CKV_GCP_2": "верное срабатывание: подмодуль fabric-net-firewall по умолчанию создаёт правило SSH из 0.0.0.0/0 (ssh_source_ranges = [\"0.0.0.0/0\"])",
+};
 const labels = [...new Set(fs.readdirSync(dir).filter((f) => f.endsWith(".meta.json")).map((f) => f.replace(".meta.json", "")))].sort();
 const norm = (p) => String(p).replace(/\\/g, "/").replace(/^\/?w\//, "").replace(/^\//, "");
 
@@ -26,7 +36,7 @@ function collect(label) {
   const ck = read(`${label}.checkov.json`, {});
   for (const b of Array.isArray(ck) ? ck : [ck]) for (const c of b?.results?.failed_checks || []) bump(c.file_path, "checkov", checkovCritical.has(c.check_id), c.check_id);
   for (const res of read(`${label}.trivy.json`, {}).Results || []) {
-    for (const m of res.Misconfigurations || []) if (m.Status === "FAIL") bump(res.Target, "trivy", m.Severity === "CRITICAL", m.AVDID || m.ID);
+    for (const m of res.Misconfigurations || []) if (m.Status === "FAIL") bump(res.Target, "trivy", m.Severity === "CRITICAL" && !trivyDowngrade.has(m.AVDID) && !trivyDowngrade.has(m.ID), m.AVDID || m.ID);
   }
   return { perFile, meta: read(`${label}.meta.json`, {}) };
 }
@@ -51,7 +61,7 @@ for (const cloud of ["aws", "azure", "gcp"]) {
   if (!labels.includes(label)) continue;
   const { perFile, meta } = collect(label);
   const cdir = `${work}/terragoat/terraform/${cloud}`;
-  const withRes = fs.readdirSync(cdir).filter((f) => f.endsWith(".tf") && /^resource\s+"/m.test(fs.readFileSync(`${cdir}/${f}`, "utf8")));
+  const withRes = fs.readdirSync(cdir).filter((f) => f.endsWith(".tf") && /^resource\s+"/m.test(fs.readFileSync(`${cdir}/${f}`, "utf8")) && !helperFiles[`${cloud}/${f}`]);
   const found = withRes.filter((f) => { const r = perFile.get(f); return r && r.opa + r.checkov + r.trivy > 0; });
   const foundOpa = withRes.filter((f) => perFile.get(f)?.opa > 0);
   const sum = (k) => [...perFile.values()].reduce((a, r) => a + r[k], 0);
@@ -60,7 +70,9 @@ for (const cloud of ["aws", "azure", "gcp"]) {
   for (const f of withRes) { const r = perFile.get(f) || {}; goatRows.push(`| ${cloud}/${f} | ${r.opa || 0} | ${r.checkov || 0} | ${r.trivy || 0} |`); }
 }
 out.push("");
-out.push(misses.length ? `Не найдено ни одним инструментом: ${misses.join(", ")}.` : "Нарушения найдены в **каждом** файле с ресурсами.");
+out.push(misses.length ? `Не найдено ни одним инструментом: ${misses.join(", ")}.` : "Нарушения найдены в **каждом** файле с намеренными ошибками.");
+out.push("");
+out.push("Не считаются файлами с ошибками: " + Object.entries(helperFiles).map(([f, why]) => "`" + f + "` — " + why).join("; ") + ".");
 out.push("");
 out.push("<details><summary>По файлам</summary>\n\n| Файл | OPA | Checkov | Trivy |\n|---|---|---|---|");
 out.push(...goatRows);
@@ -77,10 +89,10 @@ for (const label of labels.filter((l) => l.startsWith("registry-"))) {
   const { perFile, meta } = collect(label);
   const sum = (k) => [...perFile.values()].reduce((a, r) => a + r[k], 0);
   out.push(`| ${label.replace("registry-", "")} | ${meta.files ?? "?"} | ${sum("opaCrit")} | ${sum("checkovCrit")} | ${sum("trivyCrit")} | ${sum("opa")} / ${sum("checkov")} / ${sum("trivy")} |`);
-  for (const [f, r] of perFile) for (const id of r.critIds) critList.push(`${label.replace("registry-", "")}/${f}: ${id}`);
+  for (const [f, r] of perFile) for (const id of r.critIds) critList.push(`${label.replace("registry-", "")}/${f}: ${id}${reviewed[id] ? ` — ${reviewed[id]}` : ""}`);
 }
 out.push("");
-out.push("\\* критичными у Checkov считаются проверки из [ci/checkov-critical.txt](../ci/checkov-critical.txt), у Trivy — уровень CRITICAL.");
+out.push("\\* критичными у Checkov считаются проверки из [ci/checkov-critical.txt](../ci/checkov-critical.txt), у Trivy — уровень CRITICAL, кроме [ci/trivy-noncritical.txt](../ci/trivy-noncritical.txt): на модуле EKS Trivy даёт 11 ложных «критичных» (публичная точка API при `endpoint_public_access = false`, egress в интернет). Этот риск проверяет наше правило PUB-011 по итоговым значениям плана.");
 out.push("");
 out.push(critList.length ? "Критичные срабатывания для ручного разбора:\n\n" + critList.map((c) => `- ${c}`).join("\n") : "Критичных срабатываний нет.");
 out.push("");

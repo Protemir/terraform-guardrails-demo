@@ -1,12 +1,12 @@
 # Каталог правил
 
-Пакет: **57 правил** на Rego (OPA/Conftest) поверх JSON-плана Terraform/OpenTofu и HCL. Файл генерируется командой `node ci/gen-rules-doc.mjs`, CI проверяет, что он актуален.
+Пакет: **58 правил** на Rego (OPA/Conftest) поверх JSON-плана Terraform/OpenTofu и HCL. Файл генерируется командой `node ci/gen-rules-doc.mjs`, CI проверяет, что он актуален.
 
 Уровень **критично** блокирует слияние pull request. Остальные уровни попадают в комментарий и не блокируют. Дополнительно работают встроенные проверки Checkov и Trivy (блокирующие из них — в `ci/checkov-critical.txt` и уровень CRITICAL у Trivy).
 
 | Класс | Правил | Критичных |
 |---|---|---|
-| Публичный доступ | 10 | 8 |
+| Публичный доступ | 11 | 9 |
 | Шифрование | 7 | 0 |
 | Избыточные права | 10 | 3 |
 | Журналирование | 4 | 0 |
@@ -29,6 +29,7 @@
 | [PUB-008](#pub-008) | высокий | Анонимный доступ к хранилищу Azure |
 | [PUB-009](#pub-009) | критично | Firewall GCP пускает интернет на админ-порты |
 | [PUB-010](#pub-010) | критично | Ресурс GCP выдан allUsers / allAuthenticatedUsers |
+| [PUB-011](#pub-011) | критично | API управляемого Kubernetes открыт всему интернету |
 | [ENC-001](#enc-001) | высокий | Ingress без TLS |
 | [ENC-002](#enc-002) | высокий | Секрет Kubernetes открытым текстом в коде Terraform |
 | [ENC-003](#enc-003) | высокий | Хранилище данных без шифрования |
@@ -285,6 +286,26 @@ resource "google_storage_bucket_iam_member" "bad_all_users" {
   bucket = "shop-files"
   role   = "roles/storage.objectViewer"
   member = "allUsers"
+}
+```
+
+### PUB-011
+
+**API управляемого Kubernetes открыт всему интернету** · уровень: критично · [policies/rules/pub_011.rego](../policies/rules/pub_011.rego)
+
+Публичная точка API-сервера кластера (EKS, AKS, GKE) без ограничения адресов доступна для подбора учётных данных и эксплуатации уязвимостей.
+
+Как исправить: Закройте публичную точку или ограничьте её адресами VPN/офиса: EKS — endpoint_public_access = false или public_access_cidrs; AKS — authorized_ip_ranges; GKE — master_authorized_networks_config.
+
+Пример нарушения ([все примеры](../policies/examples/PUB-011.tf)):
+
+```hcl
+resource "aws_eks_cluster" "bad_public_api" {
+  name     = "shop"
+  role_arn = "arn"
+  vpc_config {
+    subnet_ids = ["subnet-1", "subnet-2"]
+  }
 }
 ```
 

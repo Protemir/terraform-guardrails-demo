@@ -114,24 +114,26 @@ jobs:
           echo '{"issues":[]}' > results/tflint.json
           for d in $(find . -name '*.tf' -not -path './.guardrails/*' -not -path './tests/registry/*' -not -path '*/policies/examples/*' -not -path '*/.terraform/*' -exec dirname {} \; | sort -u); do
             d=${d#./}
-            tflint --chdir="$d" --config "$PWD/$cfg" --format json --force > /tmp/t.json || true
-            jq --arg d "$d" '{issues: [.issues[]? | .range.filename = ($d + "/" + .range.filename)]}' /tmp/t.json > /tmp/t2.json
-            jq -s '{issues: (.[0].issues + .[1].issues)}' results/tflint.json /tmp/t2.json > /tmp/m.json && mv /tmp/m.json results/tflint.json
-            tflint --chdir="$d" --config "$PWD/$cfg" --force --format compact || true
+            # Структура модуля (main/variables/outputs.tf) требуется только от модулей библиотеки, не от корней и примеров.
+            extra=""; [[ "$d" =~ ^modules/[^/]+$ ]] || extra="--disable-rule=terraform_standard_module_structure"
+            tflint --chdir="$d" --config "$PWD/$cfg" $extra --format json --force > /tmp/t.json || true
+            jq -s '{issues: (.[0].issues + (.[1].issues // []))}' results/tflint.json /tmp/t.json > /tmp/m.json && mv /tmp/m.json results/tflint.json
+            tflint --chdir="$d" --config "$PWD/$cfg" $extra --force --format compact || true
           done
           echo "TFLint: $(jq '.issues | length' results/tflint.json) замечаний"
 
       - name: checkov
         run: |
           docker run --rm -v "$PWD:/src" -w /src $CHECKOV_IMAGE \
-            -d /src --framework terraform secrets --skip-path policies/examples --skip-path .guardrails \
+            -d /src --framework terraform secrets --skip-path policies/examples --skip-path .guardrails --skip-path tests/registry \
             -o json --soft-fail --quiet > results/checkov.json || true
           jq -r '[.. | objects | select(has("failed_checks")) | .failed_checks | length] | add // 0 | "Checkov: \(.) замечаний"' results/checkov.json || true
 
       - name: trivy
         run: |
           docker run --rm -v "$PWD:/src" -w /src $TRIVY_IMAGE config \
-            --skip-dirs policies/examples --skip-dirs .guardrails --format json --exit-code 0 --quiet /src > results/trivy.json
+            --skip-dirs policies/examples --skip-dirs .guardrails --skip-dirs tests/registry --tf-exclude-downloaded-modules \
+            --format json --exit-code 0 --quiet /src > results/trivy.json
           jq -r '[.Results[]?.Misconfigurations[]? | select(.Status=="FAIL")] | length | "Trivy: \(.) замечаний"' results/trivy.json
 
       - uses: actions/upload-artifact@v7

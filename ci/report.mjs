@@ -137,11 +137,16 @@ for (const block of Array.isArray(checkovRaw) ? checkovRaw : [checkovRaw]) {
   }
 }
 
-// Trivy
+// Trivy: CRITICAL блокирует, кроме проверок из ci/trivy-noncritical.txt (там — с причиной).
+const trivyDowngrade = new Set(
+  (fs.existsSync(new URL("./trivy-noncritical.txt", import.meta.url)) ? fs.readFileSync(new URL("./trivy-noncritical.txt", import.meta.url), "utf8") : "")
+    .split(/\r?\n/).map((l) => l.replace(/#.*/, "").trim()).filter(Boolean),
+);
 for (const res of read("trivy.json", {})?.Results || []) {
   for (const m of res.Misconfigurations || []) {
     if (m.Status && m.Status !== "FAIL") continue;
-    const sev = (m.Severity || "MEDIUM").toLowerCase();
+    let sev = (m.Severity || "MEDIUM").toLowerCase();
+    if (sev === "critical" && (trivyDowngrade.has(m.AVDID) || trivyDowngrade.has(m.ID))) sev = "high";
     add({
       tool: "Trivy", rule: m.AVDID || m.ID, severity: sev, title: m.Title, address: m.CauseMetadata?.Resource || "",
       msg: m.Message || m.Title, loc: { file: res.Target, line: m.CauseMetadata?.StartLine || 1 }, blocking: sev === "critical", file: res.Target,
