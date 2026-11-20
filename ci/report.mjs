@@ -122,7 +122,8 @@ for (const [src, inFile] of [["conftest.json", false], ["conftest-hcl.json", tru
   for (const kind of ["failures", "warnings"]) {
     for (const x of r[kind] || []) {
       const m = x.metadata || {};
-      const key = `${m.rule}|${m.address}`;
+      // Адрес без индексов count/for_each: в плане net_probe[0], в HCL — net_probe.
+      const key = `${m.rule}|${String(m.address || "").replace(/\[[^\]]*\]/g, "")}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const loc = inFile ? locateInFile(r.filename, m.address || "", m.attr) : locate(m.address || "", m.attr);
@@ -241,7 +242,7 @@ if (suppressed.length) {
   md.push("| Правило | Ресурс | Обоснование | Владелец | До | Где |\n|---|---|---|---|---|---|");
   const order = (s) => (s.tool === "OPA" ? 0 : 1);
   for (const s of suppressed.sort((a, b) => order(a) - order(b))) {
-    md.push(`| \`${s.rule}\`${s.severity ? ` (${sevRu[s.severity] || s.severity})` : ""} | ${s.address || s.file} | ${s.exception.reason} | ${s.exception.owner} | ${s.exception.expires} | ${link(s.loc)} |`);
+    md.push(`| \`${s.rule}\`${s.severity ? ` (${sevRu[s.severity] || s.severity})` : ""} | ${s.tool === "OPA" ? s.address : s.file || s.address} | ${s.exception.reason} | ${s.exception.owner} | ${s.exception.expires} | ${link(s.loc)} |`);
   }
   md.push("\n</details>\n");
 }
