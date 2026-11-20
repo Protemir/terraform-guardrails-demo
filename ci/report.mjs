@@ -239,10 +239,12 @@ if (suppressed.length) {
   // Исключения из наших правил показываем открыто: это осознанно пропущенные нарушения.
   const ours = suppressed.some((s) => s.tool === "OPA");
   md.push(`<details${ours ? " open" : ""}><summary>Применённые исключения: ${suppressed.length}</summary>\n`);
-  md.push("| Правило | Ресурс | Обоснование | Владелец | До | Где |\n|---|---|---|---|---|---|");
+  md.push("| Правило | Где | Обоснование | Владелец, срок |\n|---|---|---|---|");
   const order = (s) => (s.tool === "OPA" ? 0 : 1);
   for (const s of suppressed.sort((a, b) => order(a) - order(b))) {
-    md.push(`| \`${s.rule}\`${s.severity ? ` (${sevRu[s.severity] || s.severity})` : ""} | ${s.tool === "OPA" ? s.address : s.file || s.address} | ${s.exception.reason} | ${s.exception.owner} | ${s.exception.expires} | ${link(s.loc)} |`);
+    const what = s.tool === "OPA" ? s.address.replace(/\[[^\]]*\]/g, "") : s.file || s.address;
+    const where = s.loc && repo ? `[${what}](https://github.com/${repo}/blob/${sha}/${s.loc.file}#L${s.loc.line})` : what;
+    md.push(`| \`${s.rule}\`<br>${sevRu[s.severity] || s.severity || ""} | ${where} | ${s.exception.reason} | ${s.exception.owner}, до ${s.exception.expires} |`);
   }
   md.push("\n</details>\n");
 }
